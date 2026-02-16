@@ -65,3 +65,24 @@ train & show results: `exp_ML_train_and_result.ipynb`
 
 
 
+
+
+### Generate Indian (NSE) data in Qlib format
+
+You can generate NSE daily data in a similar pipeline using:
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling \
+  --symbols_file=path/to/nse_symbols.txt
+```
+
+`symbols_file` should contain one symbol per line in yfinance format (for example `RELIANCE.NS`, `TCS.NS`).
+If omitted, a small default symbol set is used for a smoke test.
+
+Outputs are similar to the CN script:
+- `save_path/k_data/*.pkl`
+- `save_path/export/*.csv`
+- `save_path/symbol_map.csv`
+- `qlib_export_path/{calendars,features,instruments}`

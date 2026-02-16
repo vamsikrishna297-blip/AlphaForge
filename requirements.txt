@@ -9,3 +9,4 @@ stable_baselines3==1.8.0
 torch==1.13.0
 shimmy==1.1.0
 fire
+yfinance>=0.2.40
