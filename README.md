@@ -78,8 +78,18 @@ python data_collection/fetch_india_data.py \
   --symbols_file=path/to/nse_symbols.txt
 ```
 
+Without a local list, use NSE official symbol CSV directly:
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling \
+  --symbols_url=https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv
+```
+
 `symbols_file` should contain one symbol per line in yfinance format (for example `RELIANCE.NS`, `TCS.NS`).
-If omitted, a small default symbol set is used for a smoke test.
+If `symbols_file` is omitted, the script fetches symbols from NSE's official list (`EQUITY_L.csv`) and converts them to yfinance tickers (`<SYMBOL>.NS`).
+If the NSE URL is unavailable, it falls back to a small default symbol set for a smoke test.
 
 Outputs are similar to the CN script:
 - `save_path/k_data/*.pkl`
