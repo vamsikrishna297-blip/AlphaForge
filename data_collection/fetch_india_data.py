@@ -2,8 +2,10 @@ import argparse
 import datetime
 import os
 import shutil
+from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.request import Request, urlopen
 
 import pandas as pd
 from tqdm import tqdm
@@ -22,22 +24,28 @@ DEFAULT_NSE_SYMBOLS = [
 DEFAULT_NSE_SYMBOLS_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 
 
-def _load_symbols_from_nse_archive(symbols_url: str) -> List[str]:
+def _load_symbols_from_nse_archive(symbols_url: str, timeout_s: int = 20) -> List[str]:
+    print(f"Loading NSE symbols from URL: {symbols_url} (timeout={timeout_s}s)", flush=True)
     try:
-        df = pd.read_csv(symbols_url)
+        req = Request(symbols_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=timeout_s) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+        df = pd.read_csv(StringIO(raw))
     except Exception as exc:
-        print(f"[WARN] failed to read NSE symbol list from {symbols_url}: {exc}")
+        print(f"[WARN] failed to read NSE symbol list from {symbols_url}: {exc}", flush=True)
         return DEFAULT_NSE_SYMBOLS
 
     if "SYMBOL" not in df.columns:
-        print(f"[WARN] NSE symbol list missing 'SYMBOL' column, fallback to defaults: {symbols_url}")
+        print(f"[WARN] NSE symbol list missing 'SYMBOL' column, fallback to defaults: {symbols_url}", flush=True)
         return DEFAULT_NSE_SYMBOLS
 
     symbols = sorted(df["SYMBOL"].dropna().astype(str).str.strip().unique())
     symbols = [f"{sym}.NS" for sym in symbols if sym]
     if not symbols:
-        print(f"[WARN] NSE symbol list empty, fallback to defaults: {symbols_url}")
+        print(f"[WARN] NSE symbol list empty, fallback to defaults: {symbols_url}", flush=True)
         return DEFAULT_NSE_SYMBOLS
+
+    print(f"Loaded {len(symbols)} symbols from NSE archive", flush=True)
     return symbols
 
 
@@ -48,14 +56,15 @@ def _sanitize_symbol_for_qlib(yf_symbol: str) -> str:
     return f"NS{raw}"
 
 
-def _read_symbols(symbols_file: Optional[str], symbols_url: str) -> List[str]:
+def _read_symbols(symbols_file: Optional[str], symbols_url: str, symbols_url_timeout: int) -> List[str]:
     if symbols_file is None:
-        return _load_symbols_from_nse_archive(symbols_url)
+        return _load_symbols_from_nse_archive(symbols_url, timeout_s=symbols_url_timeout)
 
     p = Path(os.path.expanduser(symbols_file))
     if not p.exists():
         raise FileNotFoundError(f"symbols_file not found: {p}")
 
+    print(f"Loading symbols from local file: {p}", flush=True)
     if p.suffix.lower() in {".csv"}:
         df = pd.read_csv(p)
         if "symbol" in df.columns:
@@ -132,6 +141,7 @@ def build_nse_qlib_data(
     qlib_export_path: str,
     symbols_file: Optional[str] = None,
     symbols_url: str = DEFAULT_NSE_SYMBOLS_URL,
+    symbols_url_timeout: int = 20,
     start_date: str = "2010-01-01",
     end_date: Optional[str] = None,
     max_workers: int = 8,
@@ -143,19 +153,19 @@ def build_nse_qlib_data(
     if end_date is None:
         end_date = (datetime.date.today() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 
-    symbols = _read_symbols(symbols_file, symbols_url)
+    symbols = _read_symbols(symbols_file, symbols_url, symbols_url_timeout)
     symbol_rows = []
 
-    print(f"Downloading {len(symbols)} NSE symbols from yfinance")
+    print(f"Downloading {len(symbols)} NSE symbols from yfinance", flush=True)
     for yf_symbol in tqdm(symbols):
         try:
             df = _download_one_symbol(yf_symbol, start_date=start_date, end_date=end_date)
         except Exception as exc:
-            print(f"[WARN] skip {yf_symbol}: {exc}")
+            print(f"[WARN] skip {yf_symbol}: {exc}", flush=True)
             continue
 
         if df.empty:
-            print(f"[WARN] no rows for {yf_symbol}")
+            print(f"[WARN] no rows for {yf_symbol}", flush=True)
             continue
 
         qlib_code = _sanitize_symbol_for_qlib(yf_symbol)
@@ -193,10 +203,10 @@ def build_nse_qlib_data(
     if day_path.exists():
         shutil.copy(day_path, day_future)
 
-    print("Done. Generated Qlib dataset:")
-    print(f"- Raw cache: {dirs['base']}")
-    print(f"- Qlib output: {qlib_dir}")
-    print(f"- Symbols exported: {len(symbol_rows)}")
+    print("Done. Generated Qlib dataset:", flush=True)
+    print(f"- Raw cache: {dirs['base']}", flush=True)
+    print(f"- Qlib output: {qlib_dir}", flush=True)
+    print(f"- Symbols exported: {len(symbol_rows)}", flush=True)
 
 
 def main():
@@ -206,6 +216,8 @@ def main():
     parser.add_argument("--symbols_file", default=None, help="Optional txt/csv with symbols like RELIANCE.NS")
     parser.add_argument("--symbols_url", default=DEFAULT_NSE_SYMBOLS_URL,
                         help="NSE CSV URL with SYMBOL column (used when --symbols_file is omitted)")
+    parser.add_argument("--symbols_url_timeout", type=int, default=20,
+                        help="Timeout in seconds when downloading NSE symbols URL")
     parser.add_argument("--start_date", default="2010-01-01")
     parser.add_argument("--end_date", default=None, help="YYYY-MM-DD, exclusive for yfinance")
     parser.add_argument("--max_workers", type=int, default=8)
@@ -216,6 +228,7 @@ def main():
         qlib_export_path=args.qlib_export_path,
         symbols_file=args.symbols_file,
         symbols_url=args.symbols_url,
+        symbols_url_timeout=args.symbols_url_timeout,
         start_date=args.start_date,
         end_date=args.end_date,
         max_workers=args.max_workers,

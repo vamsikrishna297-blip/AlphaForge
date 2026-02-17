@@ -84,7 +84,8 @@ Without a local list, use NSE official symbol CSV directly:
 python data_collection/fetch_india_data.py \
   --save_path=~/.qlib/tmp_nse \
   --qlib_export_path=~/.qlib/qlib_data/in_data_rolling \
-  --symbols_url=https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv
+  --symbols_url=https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv \
+  --symbols_url_timeout=20
 ```
 
 `symbols_file` should contain one symbol per line in yfinance format (for example `RELIANCE.NS`, `TCS.NS`).
@@ -96,3 +97,6 @@ Outputs are similar to the CN script:
 - `save_path/export/*.csv`
 - `save_path/symbol_map.csv`
 - `qlib_export_path/{calendars,features,instruments}`
+
+
+If it seems stuck before showing the tqdm progress bar, it is usually waiting for the NSE symbol URL. You can lower `--symbols_url_timeout` or pass `--symbols_file` to skip URL fetching.
