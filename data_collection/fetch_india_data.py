@@ -41,7 +41,7 @@ def _load_symbols_from_nse_archive(symbols_url: str, timeout_s: int = 20) -> Lis
         return DEFAULT_NSE_SYMBOLS
 
     symbols = sorted(df["SYMBOL"].dropna().astype(str).str.strip().unique())
-    symbols = [f"{sym}.NS" for sym in symbols if sym]
+    symbols = _normalize_to_yf_symbols(symbols)
     if not symbols:
         print(f"[WARN] NSE symbol list empty, fallback to defaults: {symbols_url}", flush=True)
         return DEFAULT_NSE_SYMBOLS
@@ -55,6 +55,18 @@ def _sanitize_symbol_for_qlib(yf_symbol: str) -> str:
     raw = yf_symbol.upper().replace(".NS", "")
     raw = "".join(ch for ch in raw if ch.isalnum())
     return f"NS{raw}"
+
+
+def _normalize_to_yf_symbols(symbols: List[str]) -> List[str]:
+    normalized = []
+    for symbol in symbols:
+        s = str(symbol).strip().upper()
+        if not s:
+            continue
+        if "." not in s:
+            s = f"{s}.NS"
+        normalized.append(s)
+    return sorted(set(normalized))
 
 
 def _read_symbols(symbols_file: Optional[str], symbols_url: str, symbols_url_timeout: int) -> List[str]:
@@ -71,14 +83,15 @@ def _read_symbols(symbols_file: Optional[str], symbols_url: str, symbols_url_tim
     print(f"Loading symbols from local file: {p}", flush=True)
     if p.suffix.lower() in {".csv"}:
         df = pd.read_csv(p)
-        if "symbol" in df.columns:
-            symbols = df["symbol"].dropna().astype(str).tolist()
+        columns = {str(col).strip().lower(): col for col in df.columns}
+        if "symbol" in columns:
+            symbols = df[columns["symbol"]].dropna().astype(str).tolist()
         else:
             symbols = df.iloc[:, 0].dropna().astype(str).tolist()
     else:
         symbols = [ln.strip() for ln in p.read_text().splitlines() if ln.strip()]
 
-    return symbols
+    return _normalize_to_yf_symbols(symbols)
 
 
 def _ensure_dirs(base_path: str) -> Dict[str, Path]:
