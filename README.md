@@ -69,7 +69,15 @@ train & show results: `exp_ML_train_and_result.ipynb`
 
 ### Generate Indian (NSE) data in Qlib format
 
-You can generate NSE daily data in a similar pipeline using:
+By default, the script uses a local symbol file at `data_collection/nse_symbols.txt` (URL bypass).
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling
+```
+
+To use your own local list:
 
 ```shell
 python data_collection/fetch_india_data.py \
@@ -78,25 +86,11 @@ python data_collection/fetch_india_data.py \
   --symbols_file=path/to/nse_symbols.txt
 ```
 
-Without a local list, use NSE official symbol CSV directly:
-
-```shell
-python data_collection/fetch_india_data.py \
-  --save_path=~/.qlib/tmp_nse \
-  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling \
-  --symbols_url=https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv \
-  --symbols_url_timeout=20
-```
-
 `symbols_file` should contain one symbol per line in yfinance format (for example `RELIANCE.NS`, `TCS.NS`).
-If `symbols_file` is omitted, the script fetches symbols from NSE's official list (`EQUITY_L.csv`) and converts them to yfinance tickers (`<SYMBOL>.NS`).
-If the NSE URL is unavailable, it falls back to a small default symbol set for a smoke test.
+A URL option still exists (`--symbols_url`) as fallback only if local file is unavailable.
 
 Outputs are similar to the CN script:
 - `save_path/k_data/*.pkl`
 - `save_path/export/*.csv`
 - `save_path/symbol_map.csv`
 - `qlib_export_path/{calendars,features,instruments}`
-
-
-If it seems stuck before showing the tqdm progress bar, it is usually waiting for the NSE symbol URL. You can lower `--symbols_url_timeout` or pass `--symbols_file` to skip URL fetching.

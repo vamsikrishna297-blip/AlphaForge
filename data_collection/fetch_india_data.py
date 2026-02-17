@@ -22,6 +22,7 @@ DEFAULT_NSE_SYMBOLS = [
 ]
 
 DEFAULT_NSE_SYMBOLS_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+DEFAULT_LOCAL_SYMBOLS_FILE = str((Path(__file__).resolve().parent / "nse_symbols.txt"))
 
 
 def _load_symbols_from_nse_archive(symbols_url: str, timeout_s: int = 20) -> List[str]:
@@ -58,9 +59,12 @@ def _sanitize_symbol_for_qlib(yf_symbol: str) -> str:
 
 def _read_symbols(symbols_file: Optional[str], symbols_url: str, symbols_url_timeout: int) -> List[str]:
     if symbols_file is None:
-        return _load_symbols_from_nse_archive(symbols_url, timeout_s=symbols_url_timeout)
+        symbols_file = DEFAULT_LOCAL_SYMBOLS_FILE
 
     p = Path(os.path.expanduser(symbols_file))
+    if not p.exists() and symbols_file == DEFAULT_LOCAL_SYMBOLS_FILE:
+        print(f"[WARN] default local symbol file not found: {p}. Trying NSE URL...", flush=True)
+        return _load_symbols_from_nse_archive(symbols_url, timeout_s=symbols_url_timeout)
     if not p.exists():
         raise FileNotFoundError(f"symbols_file not found: {p}")
 
@@ -213,7 +217,8 @@ def main():
     parser = argparse.ArgumentParser(description="Fetch NSE stocks and dump into Qlib format.")
     parser.add_argument("--save_path", default="~/.qlib/tmp_nse")
     parser.add_argument("--qlib_export_path", default="~/.qlib/qlib_data/in_data_rolling")
-    parser.add_argument("--symbols_file", default=None, help="Optional txt/csv with symbols like RELIANCE.NS")
+    parser.add_argument("--symbols_file", default=DEFAULT_LOCAL_SYMBOLS_FILE,
+                        help="Local txt/csv with symbols like RELIANCE.NS (defaults to bundled nse_symbols.txt)")
     parser.add_argument("--symbols_url", default=DEFAULT_NSE_SYMBOLS_URL,
                         help="NSE CSV URL with SYMBOL column (used when --symbols_file is omitted)")
     parser.add_argument("--symbols_url_timeout", type=int, default=20,
