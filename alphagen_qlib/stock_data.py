@@ -101,8 +101,20 @@ class StockData:
             features = change_to_raw_min(features)
         df = self._load_exprs(features)
         self.df_bak = df
+        if df is None or df.empty:
+            raise ValueError(
+                "No data returned from qlib. Check instruments/date range and qlib_path "
+                f"(instrument={self._instrument}, start={self._start_time}, "
+                f"end={self._end_time}, freq={self.freq})."
+            )
         # print(df)
         df = df.stack().unstack(level=1)
+        if df.empty or len(df.columns) == 0:
+            raise ValueError(
+                "Qlib returned an empty dataframe after stacking; ensure instrument universe "
+                "(e.g. csi300/csi500/all) exists in your qlib dataset and includes the "
+                "requested date range."
+            )
         dates = df.index.levels[0]                                      # type: ignore
         stock_ids = df.columns
         values = df.values

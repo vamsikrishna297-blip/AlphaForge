@@ -65,3 +65,35 @@ train & show results: `exp_ML_train_and_result.ipynb`
 
 
 
+
+
+### Generate Indian (NSE) data in Qlib format
+
+By default, the script uses a local symbol file at `data_collection/nse_symbols.txt` (URL bypass).
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling
+```
+
+To use your own local list:
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling \
+  --symbols_file=path/to/EQUITY_L.csv
+```
+
+`symbols_file` can be either:
+- yfinance-style tickers (`RELIANCE.NS`, `TCS.NS`) in txt/csv, or
+- NSE `EQUITY_L.csv` format with a `SYMBOL` column (the script auto-converts to `<SYMBOL>.NS`).
+
+A URL option still exists (`--symbols_url`) as fallback only if local file is unavailable.
+
+Outputs are similar to the CN script:
+- `save_path/k_data/*.pkl`
+- `save_path/export/*.csv`
+- `save_path/symbol_map.csv`
+- `qlib_export_path/{calendars,features,instruments}`

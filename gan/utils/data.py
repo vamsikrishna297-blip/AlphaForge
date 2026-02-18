@@ -4,13 +4,37 @@ from alphagen_generic.features import *
 from alphagen.data.expression import *
 
 import os
+
+
+def _resolve_qlib_path(freq: str):
+    env_key = f"QLIB_PATH_{freq.upper()}"
+
+    candidates = []
+    env_value = os.environ.get(env_key)
+    if env_value:
+        candidates.append(os.path.expanduser(env_value))
+
+    # Backward compatible: keep supporting the repo-local placeholder path when present.
+    candidates.append(os.path.expanduser("path/for/qlib"))
+
+    # Keep the default consistent with README and data_collection script outputs.
+    candidates.append(os.path.expanduser("~/.qlib/qlib_data/cn_data_rolling"))
+
+    for resolved in candidates:
+        if os.path.exists(resolved):
+            return {freq: resolved}
+
+    raise FileNotFoundError(
+        f"Qlib data path does not exist for freq='{freq}'. Tried: {candidates}. "
+        f"Set {env_key} to your local qlib dataset path."
+    )
+
+
 def get_data_by_year(
     train_start = 2010,train_end=2019,valid_year=2020,test_year =2021,
     instruments=None, target=None,freq=None,
                     ):
-    QLIB_PATH = {
-        'day':'path/for/qlib',
-    }
+    QLIB_PATH = _resolve_qlib_path(freq)
     
     from gan.utils import load_pickle,save_pickle
     # from gan.utils.qlib import get_data_my
