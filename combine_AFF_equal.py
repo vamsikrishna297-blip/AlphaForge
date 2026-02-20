@@ -1,0 +1,249 @@
+import json
+import os
+from typing import Tuple, Union
+
+import numpy as np
+import pandas as pd
+import torch
+from alphagen.utils.correlation import batch_pearsonr, batch_ret, batch_spearmanr
+from alphagen_generic.features import *
+from alphagen.data.expression import *
+from gan.utils import get_blds_list_df, load_pickle
+from gan.utils.data import get_data_by_year
+
+
+def load_alpha_pool(raw) -> Tuple[List[Expression], List[float]]:
+    exprs_raw = raw['exprs']
+    exprs = [eval(expr_raw.replace('open', 'open_').replace('$', '')) for expr_raw in exprs_raw]
+    weights = raw['weights']
+    return exprs, weights
+
+
+def load_alpha_pool_by_path(path: str) -> Tuple[List[Expression], List[float]]:
+    with open(path, encoding='utf-8') as f:
+        raw = json.load(f)
+        return load_alpha_pool(raw)
+
+
+def chunk_batch_spearmanr(x, y, chunk_size=100):
+    n_days = len(x)
+    spearmanr_list = []
+    for i in range(0, n_days, chunk_size):
+        spearmanr_list.append(batch_spearmanr(x[i:i + chunk_size], y[i:i + chunk_size]))
+    spearmanr_list = torch.cat(spearmanr_list, dim=0)
+    return spearmanr_list
+
+
+def get_tensor_metrics_raw(x, y):
+    ic_s = batch_pearsonr(x, y)
+    ric_s = chunk_batch_spearmanr(x, y, chunk_size=400)
+    ret_s = batch_ret(x, y)
+
+    ic_s = torch.nan_to_num(ic_s, nan=0)
+    ric_s = torch.nan_to_num(ric_s, nan=0)
+    ret_s = torch.nan_to_num(ret_s, nan=0)
+
+    return ic_s, ric_s, ret_s
+
+
+def main(
+    instruments: str = "csi500",
+    train_end_year: int = 2020,
+    freq: str = 'day',
+    seeds: str = '[0]',
+    cuda: int = 0,
+    save_name: str = 'test',
+    n_factors: int = 10,
+    window: Union[int, str] = 'inf',
+    sanity_sample_n: int = 5,
+    sanity_sample_date: Union[str, None] = None,
+):
+    if isinstance(seeds, str):
+        seeds = eval(seeds)
+    assert isinstance(seeds, list)
+
+    if isinstance(window, str):
+        assert window == 'inf'
+        window = float('inf')
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(cuda)
+    train_end = train_end_year
+
+    returned = get_data_by_year(
+        train_start=2010,
+        train_end=train_end,
+        valid_year=train_end + 1,
+        test_year=train_end + 2,
+        instruments=instruments,
+        target=target,
+        freq=freq,
+    )
+    data_all, data, data_valid, data_valid_withhead, data_test, data_test_withhead, _ = returned
+
+    for seed in seeds:
+        path = f"out/{save_name}_{instruments}_{train_end}_{seed}/z_bld_zoo_final.pkl"
+        tensor_save_path = f"out/{save_name}_{instruments}_{train_end}_{seed}/"
+        name = f"{train_end}_{n_factors}_{window}_{seed}"
+        zoo = load_pickle(path)
+
+        df = get_blds_list_df([zoo]).sort_values('score', ascending=False, key=lambda x: abs(x))
+        from gan.utils.builder import exprs2tensor
+        fct_tensor = exprs2tensor(df['exprs'], data_all, normalize=True)
+        tgt_tensor = exprs2tensor([target], data_all, normalize=False)
+
+        ic_list = []
+        ric_list = []
+        ret_list = []
+        from tqdm import tqdm
+        for cur in tqdm(range(fct_tensor.shape[-1])):
+            ic_s, ric_s, ret_s = get_tensor_metrics_raw(fct_tensor[..., cur], tgt_tensor[..., 0])
+            ic_list.append(ic_s)
+            ric_list.append(ric_s)
+            ret_list.append(ret_s)
+
+        ic_s = torch.stack(ic_list, dim=-1)
+        ric_s = torch.stack(ric_list, dim=-1)
+        ret_s = torch.stack(ret_list, dim=-1)
+        torch.cuda.empty_cache()
+
+        shift = 21
+
+        pred_list = []
+        ics_list = []
+        rics_list = []
+        sanity_rows = []
+        detailed_samples = []
+
+        eval_begin = len(fct_tensor) - data_test.n_days - data_valid.n_days
+        eval_end = len(fct_tensor)
+        pbar = tqdm(range(eval_begin, eval_end))
+        for cur in pbar:
+            if np.isfinite(window):
+                begin = cur - window - shift
+            else:
+                begin = 0
+
+            cur_ic = ic_s[begin:cur - shift]
+            cur_ric = ric_s[begin:cur - shift]
+            cur_ret = ret_s[begin:cur - shift]
+
+            ic_mean = cur_ic.mean(dim=0)
+            ic_std = cur_ic.std(dim=0)
+            ric_mean = cur_ric.mean(dim=0)
+            ric_std = cur_ric.std(dim=0)
+            ret_mean = cur_ret.mean(dim=0)
+            ret_std = cur_ret.std(dim=0)
+
+            icir = ic_mean / ic_std
+            ricir = ric_mean / ric_std
+            retir = ret_mean / ret_std
+
+            metrics = dict(
+                ic=ic_mean.detach().cpu().numpy(),
+                ic_std=ic_std.detach().cpu().numpy(),
+                icir=icir.detach().cpu().numpy(),
+                ric=ric_mean.detach().cpu().numpy(),
+                ric_std=ric_std.detach().cpu().numpy(),
+                ricir=ricir.detach().cpu().numpy(),
+                ret=ret_mean.detach().cpu().numpy(),
+                ret_std=ret_std.detach().cpu().numpy(),
+                retir=retir.detach().cpu().numpy(),
+            )
+            tmp = pd.DataFrame(metrics).sort_values('ricir', ascending=False, key=lambda x: abs(x))
+
+            selected = tmp[(tmp['ric'] > 0.02) & (tmp['ricir'] > 0.2)]
+            if len(selected) < 1:
+                selected = tmp.iloc[:1]
+
+            good_idx = selected.iloc[:n_factors].index.to_list()
+
+            to_pred = fct_tensor[cur, :, good_idx]
+            y_true = tgt_tensor[cur, ]
+            to_pred = torch.nan_to_num(to_pred, nan=0)
+
+            # equal-weight combine
+            pred = to_pred.mean(dim=-1, keepdim=True)
+            weight_each = 1.0 / max(len(good_idx), 1)
+
+            cur_ic = batch_pearsonr(pred.T, y_true.T)[0]
+            cur_ric = batch_spearmanr(pred.T, y_true.T)[0]
+            ics_list.append(cur_ic.detach().cpu().numpy())
+            rics_list.append(cur_ric.detach().cpu().numpy())
+
+            pbar.set_description(
+                f"eq ic:{np.nanmean(ics_list):.3f} ric:{np.nanmean(rics_list):.3f} n:{len(good_idx)}"
+            )
+
+            day_date = str(data_all._dates[cur]) if hasattr(data_all, "_dates") else str(cur)
+            step_row = {
+                "day_index": int(cur),
+                "date": day_date,
+                "selected_factors": int(len(good_idx)),
+                "weight_each": float(weight_each),
+                "step_ic": float(cur_ic.detach().cpu().item()),
+                "step_ric": float(cur_ric.detach().cpu().item()),
+                "running_ic_mean": float(np.nanmean(ics_list)),
+                "running_ric_mean": float(np.nanmean(rics_list)),
+            }
+            sanity_rows.append(step_row)
+
+            capture_by_n = sanity_sample_n > 0 and cur >= eval_end - sanity_sample_n
+            capture_by_date = sanity_sample_date is not None and str(day_date).startswith(str(sanity_sample_date))
+            if capture_by_n or capture_by_date:
+                expr_col = "exprs_str" if "exprs_str" in df.columns else "exprs"
+                selected_detail = []
+                for idx in good_idx:
+                    selected_detail.append({
+                        "factor_idx": int(idx),
+                        "expr": str(df.loc[idx][expr_col]),
+                        "coef": float(weight_each),
+                        "hist_ic": float(tmp.loc[idx]["ic"]),
+                        "hist_icir": float(tmp.loc[idx]["icir"]),
+                        "hist_ric": float(tmp.loc[idx]["ric"]),
+                        "hist_ricir": float(tmp.loc[idx]["ricir"]),
+                    })
+
+                pred_preview = pred[:5, 0].detach().cpu().numpy().tolist()
+                tgt_preview = y_true[:5, 0].detach().cpu().numpy().tolist()
+                detailed_samples.append({
+                    **step_row,
+                    "intercept": 0.0,
+                    "prediction_preview": pred_preview,
+                    "target_preview": tgt_preview,
+                    "selected_details": selected_detail,
+                })
+
+            pred_list.append(pred[:, 0])
+
+        num_1 = data_valid.n_days
+        num_2 = data_test.n_days
+        all_pred = torch.stack(pred_list, dim=0)
+        all_pred = all_pred[-num_2 - num_1:-num_1]
+        torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_valid_equal_{name}.pt")
+
+        num_ = data_test.n_days
+        all_pred = torch.stack(pred_list, dim=0)
+        all_pred = all_pred[-num_:]
+        torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_equal_{name}.pt")
+
+        pd.DataFrame(sanity_rows).to_csv(f"{tensor_save_path}/combine_equal_sanity_{name}.csv", index=False)
+        with open(f"{tensor_save_path}/combine_equal_summary_{name}.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "seed": int(seed),
+                "n_factors_requested": int(n_factors),
+                "n_steps": int(len(sanity_rows)),
+                "sanity_sample_n": int(sanity_sample_n),
+                "sanity_sample_date": sanity_sample_date,
+                "weighting": "equal",
+                "final_running_ic": float(np.nanmean(ics_list)) if len(ics_list) else 0.0,
+                "final_running_ric": float(np.nanmean(rics_list)) if len(rics_list) else 0.0,
+            }, f, indent=2)
+
+        with open(f"{tensor_save_path}/combine_equal_samples_{name}.json", "w", encoding="utf-8") as f:
+            json.dump(detailed_samples, f, indent=2)
+
+
+if __name__ == '__main__':
+    import fire
+
+    fire.Fire(main)

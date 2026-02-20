@@ -18,6 +18,8 @@ from alphagen.utils.random import reseed_everything
 from gan.utils import filter_valid_blds,save_blds
 from gan.network.generater import train_network_generator
 import gc
+import json
+import pandas as pd
 from gan.utils.data import get_data_by_year
 
 def pre_process_y(y):
@@ -221,6 +223,9 @@ def main(
             device = 'cuda:0'
 
         print(f"seed:{seed},name:{cfg.name}")
+        out_dir = f"out/{cfg.name}"
+        os.makedirs(out_dir, exist_ok=True)
+        sanity_rows = []
 
         from gan.network.predictor import NetP
         from gan.network.generater import NetG_DCGAN
@@ -335,6 +340,15 @@ def main(
             zoo_blds = zoo_blds + new_zoo
 
             print(f" zoo_prev:{lengh_s['zoo_prev']},all_new:{len(new_zoo)},current:{len(zoo_blds)}")
+            sanity_rows.append({
+                "iter": t,
+                "zoo_prev": int(lengh_s["zoo_prev"]),
+                "train_generated": int(lengh_s["train"]),
+                "new_generated": int(lengh_s["new"]),
+                "all_new": int(lengh_s["all_new"]),
+                "new_selected": int(len(new_zoo)),
+                "zoo_current": int(len(zoo_blds)),
+            })
             zoo_blds.evaluate(data,target,empty_metric,verbose=True)
             if t % 5 == 2:
                 print('#'*20,"zoo_rebalance")
@@ -364,6 +378,16 @@ def main(
         metric = get_metric(empty_blds,device = cfg.device,corr_thresh=cfg.f_corr_thresh)
         zoo_blds.evaluate(data,target,metric,verbose=True)
         save_blds(zoo_blds,f"out/{cfg.name}",'zoo_final')
+
+        pd.DataFrame(sanity_rows).to_csv(f"{out_dir}/training_sanity.csv", index=False)
+        with open(f"{out_dir}/training_summary.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "seed": int(seed),
+                "name": cfg.name,
+                "target_zoo_size": int(cfg.num_factors),
+                "final_zoo_size": int(len(zoo_blds)),
+                "iterations": int(len(sanity_rows)),
+            }, f, indent=2)
 
 if __name__ == '__main__':
     import fire

@@ -108,6 +108,7 @@ def main(
         save_name:str = 'test',
         n_factors:int = 10,
         window:Union[int,str] = 'inf',
+        sanity_sample_n:int = 5,
 ):
     if isinstance(seeds,str):
         seeds = eval(seeds)
@@ -166,9 +167,13 @@ def main(
         rics_list = []
         good_idx_list = []
         weights_list = []
+        sanity_rows = []
+        detailed_samples = []
 
         # evaluate from the first day of the valid set untill the last day of the test set
-        pbar = tqdm(range(len(fct_tensor)-data_test.n_days-data_valid.n_days,len(fct_tensor)))
+        eval_begin = len(fct_tensor)-data_test.n_days-data_valid.n_days
+        eval_end = len(fct_tensor)
+        pbar = tqdm(range(eval_begin, eval_end))
         for cur in pbar:
 
             # control the past window that we use to evaluate the factors in order to filter factors and generate the weights
@@ -251,6 +256,38 @@ def main(
             pbar.set_description(
                 f"ic:{np.nanmean(ics_list):.3f} ric:{np.nanmean(rics_list):.3f} n:{len(good_idx)}"
                 )
+            day_date = str(data_all._dates[cur]) if hasattr(data_all, "_dates") else str(cur)
+            step_row = {
+                "day_index": int(cur),
+                "date": day_date,
+                "selected_factors": int(len(good_idx)),
+                "step_ic": float(cur_ic.detach().cpu().item()),
+                "step_ric": float(cur_ric.detach().cpu().item()),
+                "running_ic_mean": float(np.nanmean(ics_list)),
+                "running_ric_mean": float(np.nanmean(rics_list)),
+            }
+            sanity_rows.append(step_row)
+
+            if sanity_sample_n > 0 and cur >= eval_end - sanity_sample_n:
+                coef_np = coef.detach().cpu().numpy().reshape(-1)
+                expr_col = "exprs_str" if "exprs_str" in df.columns else "exprs"
+                selected_detail = []
+                for local_i, idx in enumerate(good_idx):
+                    selected_detail.append({
+                        "factor_idx": int(idx),
+                        "expr": str(df.loc[idx][expr_col]),
+                        "coef": float(coef_np[local_i]),
+                        "hist_ic": float(tmp.loc[idx]["ic"]),
+                        "hist_icir": float(tmp.loc[idx]["icir"]),
+                        "hist_ric": float(tmp.loc[idx]["ric"]),
+                        "hist_ricir": float(tmp.loc[idx]["ricir"]),
+                    })
+                detailed_samples.append({
+                    **step_row,
+                    "intercept": float(coef_np[-1]),
+                    "selected_details": selected_detail,
+                })
+
             pred_list.append(pred[:,0])
 
         # infer the valid set and save the results
@@ -266,6 +303,20 @@ def main(
         all_pred = torch.stack(pred_list,dim=0)
         all_pred = all_pred[-num_:]
         torch.save(all_pred.detach().cpu(),f"{tensor_save_path}/pred_{name}.pt")
+
+        pd.DataFrame(sanity_rows).to_csv(f"{tensor_save_path}/combine_sanity_{name}.csv", index=False)
+        with open(f"{tensor_save_path}/combine_summary_{name}.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "seed": int(seed),
+                "n_factors_requested": int(n_factors),
+                "n_steps": int(len(sanity_rows)),
+                "sanity_sample_n": int(sanity_sample_n),
+                "final_running_ic": float(np.nanmean(ics_list)) if len(ics_list) else 0.0,
+                "final_running_ric": float(np.nanmean(rics_list)) if len(rics_list) else 0.0,
+            }, f, indent=2)
+
+        with open(f"{tensor_save_path}/combine_samples_{name}.json", "w", encoding="utf-8") as f:
+            json.dump(detailed_samples, f, indent=2)
 
         # torch.cuda.empty_cache()
 

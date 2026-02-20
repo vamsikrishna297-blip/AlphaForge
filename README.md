@@ -24,13 +24,36 @@ Here,
 - `train_end_year` is the last year of training set, when train_end_year is 2020,the train,valid and test set is seperately: `2010-01-01 to 2020-12-31`,`2021-01-01 to 2021-12-31`,`2022-01-01 to 2022-12-31`
 - `save_name` is the prefix when saving running results. `zoo_size` is the num of factors to save at stage 1 mining model.
 
+Sanity-check files per seed (`out/<save_name>_<instruments>_<train_end_year>_<seed>/`):
+- `training_sanity.csv`
+- `training_summary.json`
+
 #### stage2: Combining alpha factors
 ```shell
-python combine_AFF.py --instruments=csi300 --train_end_year=2020 --seeds=[0,1,2,3,4] --save_name=test --n_factors=10 --window=inf
+python combine_AFF.py --instruments=csi300 --train_end_year=2020 --seeds=[0,1,2,3,4] --save_name=test --n_factors=10 --window=inf --sanity_sample_n=5
 ```
 Here `instruments,train_end_year,seeds,save_name`,` must be the same as it in stage 1
 - `n_factors` is the num of factors used at each day, it should be less than or equal to `zoo_size` in stage 1.
 - `window` is the slicing window that is used to evaluate the alpha factors in order to dynamicly select and cobine.
+
+Sanity-check files per seed (`out/<save_name>_<instruments>_<train_end_year>_<seed>/`):
+- `combine_sanity_<train_end>_<n_factors>_<window>_<seed>.csv`
+- `combine_summary_<train_end>_<n_factors>_<window>_<seed>.json`
+- `combine_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample day-level coefficient/factor details)
+- `pred_valid_<train_end>_<n_factors>_<window>_<seed>.pt`
+- `pred_<train_end>_<n_factors>_<window>_<seed>.pt`
+
+
+Equal-weight combine (no dynamic regression weights):
+```shell
+python combine_AFF_equal.py --instruments=csi300 --train_end_year=2020 --seeds='[0,1,2,3,4]' --save_name=test --n_factors=10 --window=inf --sanity_sample_n=5 --sanity_sample_date=2022-06-15
+```
+Outputs per seed under `out/<save_name>_<instruments>_<train_end_year>_<seed>/`:
+- `pred_valid_equal_<train_end>_<n_factors>_<window>_<seed>.pt`
+- `pred_equal_<train_end>_<n_factors>_<window>_<seed>.pt`
+- `combine_equal_sanity_<train_end>_<n_factors>_<window>_<seed>.csv`
+- `combine_equal_summary_<train_end>_<n_factors>_<window>_<seed>.json`
+- `combine_equal_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample-date/day factor coefficients, IC stats, prediction preview)
 
 #### stage3: Show the results
 
@@ -41,6 +64,16 @@ exp_AFF_calc_result.ipynb
 ```
 
 to generate and concat experiment result.
+
+Or run a script that writes stage-3 sanity outputs to files:
+```shell
+python exp_AFF_calc_result.py --instruments=csi300 --train_end_year=2020 --seeds='[0,1,2,3,4]' --save_name=test --n_factors=10 --window=inf
+```
+This creates files under `out/results/` including:
+- `stage3_seed_metrics_<save_name>_<instruments>_<train_end_year>.csv`
+- `stage3_agg_metrics_<save_name>_<instruments>_<train_end_year>.csv`
+- `stage3_predictions_<save_name>_<instruments>_<train_end_year>.csv`
+- `stage3_summary_<save_name>_<instruments>_<train_end_year>.json`
 
 
 ### Run baseline experiments
@@ -65,3 +98,35 @@ train & show results: `exp_ML_train_and_result.ipynb`
 
 
 
+
+
+### Generate Indian (NSE) data in Qlib format
+
+By default, the script uses a local symbol file at `data_collection/nse_symbols.txt` (URL bypass).
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling
+```
+
+To use your own local list:
+
+```shell
+python data_collection/fetch_india_data.py \
+  --save_path=~/.qlib/tmp_nse \
+  --qlib_export_path=~/.qlib/qlib_data/in_data_rolling \
+  --symbols_file=path/to/EQUITY_L.csv
+```
+
+`symbols_file` can be either:
+- yfinance-style tickers (`RELIANCE.NS`, `TCS.NS`) in txt/csv, or
+- NSE `EQUITY_L.csv` format with a `SYMBOL` column (the script auto-converts to `<SYMBOL>.NS`).
+
+A URL option still exists (`--symbols_url`) as fallback only if local file is unavailable.
+
+Outputs are similar to the CN script:
+- `save_path/k_data/*.pkl`
+- `save_path/export/*.csv`
+- `save_path/symbol_map.csv`
+- `qlib_export_path/{calendars,features,instruments}`
