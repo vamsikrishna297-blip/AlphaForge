@@ -46,6 +46,35 @@ def get_tensor_metrics_raw(x, y):
     return ic_s, ric_s, ret_s
 
 
+
+
+def _quintile_bucket_returns(pred: torch.Tensor, y_true: torch.Tensor, n_buckets: int = 5) -> dict:
+    pred_np = pred.detach().cpu().numpy().reshape(-1)
+    y_np = y_true.detach().cpu().numpy().reshape(-1)
+
+    valid_mask = np.isfinite(pred_np) & np.isfinite(y_np)
+    pred_np = pred_np[valid_mask]
+    y_np = y_np[valid_mask]
+
+    if len(pred_np) < n_buckets:
+        out = {f"q{i+1}": 0.0 for i in range(n_buckets)}
+        out["q5_q1"] = 0.0
+        out["n_assets"] = int(len(pred_np))
+        return out
+
+    order = np.argsort(pred_np)
+    y_sorted = y_np[order]
+    chunks = np.array_split(y_sorted, n_buckets)
+
+    vals = {}
+    for i, ch in enumerate(chunks, start=1):
+        vals[f"q{i}"] = float(np.nanmean(ch)) if len(ch) else 0.0
+
+    vals["q5_q1"] = vals["q5"] - vals["q1"]
+    vals["n_assets"] = int(len(pred_np))
+    return vals
+
+
 def main(
     instruments: str = "csi500",
     train_end_year: int = 2020,
@@ -167,6 +196,7 @@ def main(
 
             cur_ic = batch_pearsonr(pred.T, y_true.T)[0]
             cur_ric = batch_spearmanr(pred.T, y_true.T)[0]
+            qret = _quintile_bucket_returns(pred, y_true, n_buckets=5)
             ics_list.append(cur_ic.detach().cpu().numpy())
             rics_list.append(cur_ric.detach().cpu().numpy())
 
@@ -184,6 +214,13 @@ def main(
                 "step_ric": float(cur_ric.detach().cpu().item()),
                 "running_ic_mean": float(np.nanmean(ics_list)),
                 "running_ric_mean": float(np.nanmean(rics_list)),
+                "q1_ret": qret["q1"],
+                "q2_ret": qret["q2"],
+                "q3_ret": qret["q3"],
+                "q4_ret": qret["q4"],
+                "q5_ret": qret["q5"],
+                "q5_q1_ret": qret["q5_q1"],
+                "n_assets": qret["n_assets"],
             }
             sanity_rows.append(step_row)
 
@@ -210,6 +247,7 @@ def main(
                     "intercept": 0.0,
                     "prediction_preview": pred_preview,
                     "target_preview": tgt_preview,
+                    "quintile_returns": qret,
                     "selected_details": selected_detail,
                 })
 
@@ -226,7 +264,11 @@ def main(
         all_pred = all_pred[-num_:]
         torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_equal_{name}.pt")
 
-        pd.DataFrame(sanity_rows).to_csv(f"{tensor_save_path}/combine_equal_sanity_{name}.csv", index=False)
+        sanity_df = pd.DataFrame(sanity_rows)
+        sanity_df.to_csv(f"{tensor_save_path}/combine_equal_sanity_{name}.csv", index=False)
+        sanity_df[["day_index", "date", "q1_ret", "q2_ret", "q3_ret", "q4_ret", "q5_ret", "q5_q1_ret", "n_assets"]].to_csv(
+            f"{tensor_save_path}/combine_equal_quintiles_{name}.csv", index=False
+        )
         with open(f"{tensor_save_path}/combine_equal_summary_{name}.json", "w", encoding="utf-8") as f:
             json.dump({
                 "seed": int(seed),
@@ -237,6 +279,9 @@ def main(
                 "weighting": "equal",
                 "final_running_ic": float(np.nanmean(ics_list)) if len(ics_list) else 0.0,
                 "final_running_ric": float(np.nanmean(rics_list)) if len(rics_list) else 0.0,
+                "avg_q1_ret": float(sanity_df["q1_ret"].mean()) if len(sanity_df) else 0.0,
+                "avg_q5_ret": float(sanity_df["q5_ret"].mean()) if len(sanity_df) else 0.0,
+                "avg_q5_q1_ret": float(sanity_df["q5_q1_ret"].mean()) if len(sanity_df) else 0.0,
             }, f, indent=2)
 
         with open(f"{tensor_save_path}/combine_equal_samples_{name}.json", "w", encoding="utf-8") as f:
