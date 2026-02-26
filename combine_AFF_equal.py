@@ -242,11 +242,21 @@ def main(
 
                 pred_preview = pred[:5, 0].detach().cpu().numpy().tolist()
                 tgt_preview = y_true[:5, 0].detach().cpu().numpy().tolist()
+                stock_ids = list(data_all._stock_ids[:5]) if hasattr(data_all, "_stock_ids") else list(range(len(pred_preview)))
+                stock_preview = [
+                    {
+                        "stock": str(stock_ids[i]),
+                        "prediction": float(pred_preview[i]) if np.isfinite(pred_preview[i]) else None,
+                        "target": float(tgt_preview[i]) if np.isfinite(tgt_preview[i]) else None,
+                    }
+                    for i in range(len(pred_preview))
+                ]
                 detailed_samples.append({
                     **step_row,
                     "intercept": 0.0,
                     "prediction_preview": pred_preview,
                     "target_preview": tgt_preview,
+                    "stock_preview": stock_preview,
                     "quintile_returns": qret,
                     "selected_details": selected_detail,
                 })
