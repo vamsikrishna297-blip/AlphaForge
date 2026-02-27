@@ -93,15 +93,38 @@ class StockData:
         if not isinstance(exprs, list):
             exprs = [exprs]
         cal: np.ndarray = D.calendar(freq=self.freq)
-        start_index = cal.searchsorted(pd.Timestamp(self._start_time))  # type: ignore
-        end_index = cal.searchsorted(pd.Timestamp(self._end_time))  # type: ignore
-        real_start_time = cal[start_index - self.max_backtrack_days]
-        if cal[end_index] != pd.Timestamp(self._end_time):
+        if len(cal) == 0:
+            raise ValueError(f"Qlib calendar is empty for freq='{self.freq}'.")
+
+        start_ts = pd.Timestamp(self._start_time)
+        end_ts = pd.Timestamp(self._end_time)
+
+        start_index = int(cal.searchsorted(start_ts))  # type: ignore
+        end_index = int(cal.searchsorted(end_ts))  # type: ignore
+
+        # Clamp to valid calendar range to avoid negative / overflow indexing.
+        start_index = min(max(start_index, 0), len(cal) - 1)
+        end_index = min(max(end_index, 0), len(cal) - 1)
+
+        if cal[end_index] > end_ts and end_index > 0:
             end_index -= 1
-        # real_end_time = cal[min(end_index + self.max_future_days,len(cal)-1)]
-        real_end_time = cal[end_index + self.max_future_days]
-        result =  (QlibDataLoader(config=exprs,freq=self.freq)  # type: ignore
-                .load(self._instrument, real_start_time, real_end_time))
+
+        real_start_idx = max(start_index - self.max_backtrack_days, 0)
+        real_end_idx = min(end_index + self.max_future_days, len(cal) - 1)
+
+        real_start_time = cal[real_start_idx]
+        real_end_time = cal[real_end_idx]
+
+        if real_start_time > real_end_time:
+            raise ValueError(
+                "Invalid calendar window after indexing. "
+                f"start={self._start_time}, end={self._end_time}, "
+                f"real_start={real_start_time}, real_end={real_end_time}, "
+                f"calendar_range=({cal[0]}, {cal[-1]})."
+            )
+
+        result = (QlibDataLoader(config=exprs, freq=self.freq)  # type: ignore
+                  .load(self._instrument, real_start_time, real_end_time))
         return result
     
     def _get_data(self) -> Tuple[torch.Tensor, pd.Index, pd.Index]:
