@@ -38,6 +38,18 @@ def change_to_raw(features):
     return result
 
 
+def change_to_raw_no_factor(features):
+    """Fallback for datasets that do not provide `$factor`."""
+    result = []
+    for feature in features:
+        if feature in ['$open', '$close', '$high', '$low', '$vwap']:
+            result.append(feature)
+        elif feature in ['$volume']:
+            result.append(f"{feature}/1000000")
+        else:
+            raise ValueError(f"feature {feature} not supported")
+    return result
+
 
 def _normalize_qlib_region(region: str) -> str:
     normalized = str(region).strip().lower()
@@ -128,18 +140,29 @@ class StockData:
         return result
     
     def _get_data(self) -> Tuple[torch.Tensor, pd.Index, pd.Index]:
-        features = ['$' + f.name.lower() for f in self._features]
+        base_features = ['$' + f.name.lower() for f in self._features]
         if self.raw and self.freq == 'day':
-            features = change_to_raw(features)
+            features = change_to_raw(base_features)
         elif self.raw:
-            features = change_to_raw_min(features)
+            features = change_to_raw_min(base_features)
+        else:
+            features = base_features
+
         df = self._load_exprs(features)
+
+        # Fallback for custom datasets that do not have `$factor`.
+        if (df is None or df.empty) and self.raw and self.freq == 'day':
+            fallback_features = change_to_raw_no_factor(base_features)
+            df = self._load_exprs(fallback_features)
+            if df is not None and not df.empty:
+                features = fallback_features
+
         self.df_bak = df
         if df is None or df.empty:
             raise ValueError(
-                "No data returned from qlib. Check instruments/date range and qlib_path "
+                "No data returned from qlib. Check instruments/date range/feature fields and qlib_path "
                 f"(instrument={self._instrument}, start={self._start_time}, "
-                f"end={self._end_time}, freq={self.freq})."
+                f"end={self._end_time}, freq={self.freq}, features={features})."
             )
         # print(df)
         df = df.stack().unstack(level=1)
