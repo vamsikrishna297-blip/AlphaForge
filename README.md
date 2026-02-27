@@ -11,6 +11,17 @@ Then download stock data through running `data_collection/fetch_baostock_data.py
 The next, Modify the correspoding `/path/for/qlib_data` in `gan.utils.data.py` to the data you downloaded (the dafault setting is `~/.qlib/qlib_data/cn_data_rolling`)
 
 
+#### Price adjustment factor (`factor`) in exported Qlib data
+
+For CN data exported by `data_collection/fetch_baostock_data.py`, the column `factor` in Qlib files is sourced from Baostock `foreAdjustFactor` (renamed during export).
+
+In `alphagen_qlib/stock_data.py` daily raw features use this convention:
+- `open`, `close`, `high`, `low`, and `vwap` are multiplied by `$factor`
+- `volume` is divided by `$factor`
+
+This keeps price/volume features consistent under corporate-action adjustments (e.g., splits/dividends).
+
+
 ### Run Our Model
 
 #### stage1: Minning alpha factors
