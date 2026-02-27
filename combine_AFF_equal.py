@@ -46,6 +46,8 @@ def get_tensor_metrics_raw(x, y):
     return ic_s, ric_s, ret_s
 
 
+
+
 def _quintile_bucket_returns(pred: torch.Tensor, y_true: torch.Tensor, n_buckets: int = 5) -> dict:
     pred_np = pred.detach().cpu().numpy().reshape(-1)
     y_np = y_true.detach().cpu().numpy().reshape(-1)
@@ -114,16 +116,15 @@ def main(
         zoo = load_pickle(path)
 
         df = get_blds_list_df([zoo]).sort_values('score', ascending=False, key=lambda x: abs(x))
-        expr_col = "exprs_str" if "exprs_str" in df.columns else "exprs"
-
         from gan.utils.builder import exprs2tensor
         fct_tensor = exprs2tensor(df['exprs'], data_all, normalize=True)
         tgt_tensor = exprs2tensor([target], data_all, normalize=False)
+        vwap_t1_tensor = exprs2tensor([Ref(vwap, -1)], data_all, normalize=False)
+        vwap_t21_tensor = exprs2tensor([Ref(vwap, -21)], data_all, normalize=False)
 
         ic_list = []
         ric_list = []
         ret_list = []
-
         from tqdm import tqdm
         for cur in tqdm(range(fct_tensor.shape[-1])):
             ic_s, ric_s, ret_s = get_tensor_metrics_raw(fct_tensor[..., cur], tgt_tensor[..., 0])
@@ -148,7 +149,10 @@ def main(
         eval_end = len(fct_tensor)
         pbar = tqdm(range(eval_begin, eval_end))
         for cur in pbar:
-            begin = cur - window - shift if np.isfinite(window) else 0
+            if np.isfinite(window):
+                begin = cur - window - shift
+            else:
+                begin = 0
 
             cur_ic = ic_s[begin:cur - shift]
             cur_ric = ric_s[begin:cur - shift]
@@ -184,52 +188,30 @@ def main(
 
             good_idx = selected.iloc[:n_factors].index.to_list()
 
-            x = fct_tensor[begin:cur - shift, :, good_idx]
-            y = tgt_tensor[begin:cur - shift]
             to_pred = fct_tensor[cur, :, good_idx]
-            y_true = tgt_tensor[cur]
-
-            y = y.reshape(-1, y.shape[-1])
-            x = x.reshape(-1, x.shape[-1])
-
-            to_select = torch.isfinite(y)[:, 0]
-            y = y[to_select]
-            x = x[to_select]
-
+            y_true = tgt_tensor[cur, ]
             to_pred = torch.nan_to_num(to_pred, nan=0)
 
-            ones = torch.ones_like(x[..., 0:1])
-            x = torch.cat([x, ones], dim=-1)
-            ones = torch.ones_like(to_pred[..., 0:1])
-            to_pred = torch.cat([to_pred, ones], dim=-1)
-
-            coef = torch.linalg.lstsq(x, y).solution
-            pred = to_pred @ coef
+            # equal-weight combine
+            pred = to_pred.mean(dim=-1, keepdim=True)
+            weight_each = 1.0 / max(len(good_idx), 1)
 
             cur_ic = batch_pearsonr(pred.T, y_true.T)[0]
             cur_ric = batch_spearmanr(pred.T, y_true.T)[0]
+            qret = _quintile_bucket_returns(pred, y_true, n_buckets=5)
             ics_list.append(cur_ic.detach().cpu().numpy())
             rics_list.append(cur_ric.detach().cpu().numpy())
 
-            pbar.set_description(f"ic:{np.nanmean(ics_list):.3f} ric:{np.nanmean(rics_list):.3f} n:{len(good_idx)}")
+            pbar.set_description(
+                f"eq ic:{np.nanmean(ics_list):.3f} ric:{np.nanmean(rics_list):.3f} n:{len(good_idx)}"
+            )
 
             day_date = str(data_all._dates[cur]) if hasattr(data_all, "_dates") else str(cur)
-            qret = _quintile_bucket_returns(pred, y_true, n_buckets=5)
-            y_true_1d = y_true[:, 0]
-            finite_mask = torch.isfinite(y_true_1d)
-            if finite_mask.any():
-                index_ret_ew = float(y_true_1d[finite_mask].mean().detach().cpu().item())
-                cs_dispersion = float(y_true_1d[finite_mask].std().detach().cpu().item())
-            else:
-                index_ret_ew = 0.0
-                cs_dispersion = 0.0
-
-            top_formulas = [str(df.loc[idx][expr_col]) for idx in good_idx[:10]]
-
             step_row = {
                 "day_index": int(cur),
                 "date": day_date,
                 "selected_factors": int(len(good_idx)),
+                "weight_each": float(weight_each),
                 "step_ic": float(cur_ic.detach().cpu().item()),
                 "step_ric": float(cur_ric.detach().cpu().item()),
                 "running_ic_mean": float(np.nanmean(ics_list)),
@@ -241,23 +223,19 @@ def main(
                 "q5_ret": qret["q5"],
                 "q5_q1_ret": qret["q5_q1"],
                 "n_assets": qret["n_assets"],
-                "equal_weighted_index_ret": index_ret_ew,
-                "cs_return_dispersion": cs_dispersion,
             }
-            for i in range(10):
-                step_row[f"top_formula_{i + 1}"] = top_formulas[i] if i < len(top_formulas) else ""
             sanity_rows.append(step_row)
 
             capture_by_n = sanity_sample_n > 0 and cur >= eval_end - sanity_sample_n
             capture_by_date = sanity_sample_date is not None and str(day_date).startswith(str(sanity_sample_date))
             if capture_by_n or capture_by_date:
-                coef_np = coef.detach().cpu().numpy().reshape(-1)
+                expr_col = "exprs_str" if "exprs_str" in df.columns else "exprs"
                 selected_detail = []
-                for local_i, idx in enumerate(good_idx):
+                for idx in good_idx:
                     selected_detail.append({
                         "factor_idx": int(idx),
                         "expr": str(df.loc[idx][expr_col]),
-                        "coef": float(coef_np[local_i]),
+                        "coef": float(weight_each),
                         "hist_ic": float(tmp.loc[idx]["ic"]),
                         "hist_icir": float(tmp.loc[idx]["icir"]),
                         "hist_ric": float(tmp.loc[idx]["ric"]),
@@ -266,22 +244,27 @@ def main(
 
                 pred_preview = pred[:5, 0].detach().cpu().numpy().tolist()
                 tgt_preview = y_true[:5, 0].detach().cpu().numpy().tolist()
+                vwap_t1_preview = vwap_t1_tensor[cur, :5, 0].detach().cpu().numpy().tolist()
+                vwap_t21_preview = vwap_t21_tensor[cur, :5, 0].detach().cpu().numpy().tolist()
                 stock_ids = list(data_all._stock_ids[:5]) if hasattr(data_all, "_stock_ids") else list(range(len(pred_preview)))
                 stock_preview = [
                     {
                         "stock": str(stock_ids[i]),
                         "prediction": float(pred_preview[i]) if np.isfinite(pred_preview[i]) else None,
                         "target": float(tgt_preview[i]) if np.isfinite(tgt_preview[i]) else None,
+                        "vwap_t1": float(vwap_t1_preview[i]) if np.isfinite(vwap_t1_preview[i]) else None,
+                        "vwap_t21": float(vwap_t21_preview[i]) if np.isfinite(vwap_t21_preview[i]) else None,
                     }
                     for i in range(len(pred_preview))
                 ]
-
                 detailed_samples.append({
                     **step_row,
-                    "intercept": float(coef_np[-1]),
+                    "intercept": 0.0,
                     "prediction_preview": pred_preview,
                     "target_preview": tgt_preview,
                     "stock_preview": stock_preview,
+                    "vwap_t1_preview": vwap_t1_preview,
+                    "vwap_t21_preview": vwap_t21_preview,
                     "quintile_returns": qret,
                     "selected_details": selected_detail,
                 })
@@ -292,37 +275,34 @@ def main(
         num_2 = data_test.n_days
         all_pred = torch.stack(pred_list, dim=0)
         all_pred = all_pred[-num_2 - num_1:-num_1]
-        torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_valid_{name}.pt")
+        torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_valid_equal_{name}.pt")
 
         num_ = data_test.n_days
         all_pred = torch.stack(pred_list, dim=0)
         all_pred = all_pred[-num_:]
-        torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_{name}.pt")
+        torch.save(all_pred.detach().cpu(), f"{tensor_save_path}/pred_equal_{name}.pt")
 
         sanity_df = pd.DataFrame(sanity_rows)
-        sanity_df.to_csv(f"{tensor_save_path}/combine_sanity_{name}.csv", index=False)
+        sanity_df.to_csv(f"{tensor_save_path}/combine_equal_sanity_{name}.csv", index=False)
         sanity_df[["day_index", "date", "q1_ret", "q2_ret", "q3_ret", "q4_ret", "q5_ret", "q5_q1_ret", "n_assets"]].to_csv(
-            f"{tensor_save_path}/combine_quintiles_{name}.csv", index=False
+            f"{tensor_save_path}/combine_equal_quintiles_{name}.csv", index=False
         )
-
-        with open(f"{tensor_save_path}/combine_summary_{name}.json", "w", encoding="utf-8") as f:
+        with open(f"{tensor_save_path}/combine_equal_summary_{name}.json", "w", encoding="utf-8") as f:
             json.dump({
                 "seed": int(seed),
                 "n_factors_requested": int(n_factors),
                 "n_steps": int(len(sanity_rows)),
                 "sanity_sample_n": int(sanity_sample_n),
                 "sanity_sample_date": sanity_sample_date,
-                "weighting": "linear_regression",
+                "weighting": "equal",
                 "final_running_ic": float(np.nanmean(ics_list)) if len(ics_list) else 0.0,
                 "final_running_ric": float(np.nanmean(rics_list)) if len(rics_list) else 0.0,
                 "avg_q1_ret": float(sanity_df["q1_ret"].mean()) if len(sanity_df) else 0.0,
                 "avg_q5_ret": float(sanity_df["q5_ret"].mean()) if len(sanity_df) else 0.0,
                 "avg_q5_q1_ret": float(sanity_df["q5_q1_ret"].mean()) if len(sanity_df) else 0.0,
-                "avg_equal_weighted_index_ret": float(sanity_df["equal_weighted_index_ret"].mean()) if len(sanity_df) else 0.0,
-                "avg_cs_return_dispersion": float(sanity_df["cs_return_dispersion"].mean()) if len(sanity_df) else 0.0,
             }, f, indent=2)
 
-        with open(f"{tensor_save_path}/combine_samples_{name}.json", "w", encoding="utf-8") as f:
+        with open(f"{tensor_save_path}/combine_equal_samples_{name}.json", "w", encoding="utf-8") as f:
             json.dump(detailed_samples, f, indent=2)
 
 
