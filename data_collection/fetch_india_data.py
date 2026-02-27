@@ -51,10 +51,10 @@ def _load_symbols_from_nse_archive(symbols_url: str, timeout_s: int = 20) -> Lis
 
 
 def _sanitize_symbol_for_qlib(yf_symbol: str) -> str:
-    """Convert yfinance symbol like RELIANCE.NS to qlib-safe code like NSRELIANCE."""
+    """Convert yfinance symbol like RELIANCE.NS to qlib-safe code like nsreliance."""
     raw = yf_symbol.upper().replace(".NS", "")
     raw = "".join(ch for ch in raw if ch.isalnum())
-    return f"NS{raw}"
+    return f"ns{raw.lower()}"
 
 
 def _normalize_to_yf_symbols(symbols: List[str]) -> List[str]:

@@ -155,6 +155,7 @@ python train_AFF.py --instruments=nifty500 --train_end_year=2020 --seeds=[0] --s
 
 
 Troubleshooting (`No data returned from qlib`):
+- If your `instruments/*.txt` uses uppercase codes but `features/` folders are lowercase (or vice-versa), rebuild the dataset so both use the same code format. The exporter now writes lowercase qlib codes (e.g., `nsreliance`) consistently.
 - Ensure `QLIB_PATH_DAY` points to the real dumped dataset root (the folder containing `calendars/`, `features/`, `instruments/`).
 - Ensure `instruments/<name>.txt` exists for the value passed to `--instruments` (for example `instruments/all.txt` or `instruments/nifty500.txt`).
 - For NSE data, set `QLIB_REGION=in`.
