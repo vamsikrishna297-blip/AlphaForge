@@ -147,7 +147,7 @@ The script also writes `instruments/all.txt` and `instruments/nifty500.txt` so t
 
 ```shell
 export QLIB_PATH_DAY=~/.qlib/qlib_data/in_data_rolling
-export QLIB_REGION=in
+export QLIB_REGION=cn
 python train_AFF.py --instruments=nifty500 --train_end_year=2020 --seeds=[0] --save_name=test
 ```
 
@@ -159,4 +159,4 @@ Troubleshooting (`No data returned from qlib`):
 - If your `instruments/*.txt` uses uppercase codes but `features/` folders are lowercase (or vice-versa), rebuild the dataset so both use the same code format. The exporter now writes lowercase qlib codes (e.g., `nsreliance`) consistently.
 - Ensure `QLIB_PATH_DAY` points to the real dumped dataset root (the folder containing `calendars/`, `features/`, `instruments/`).
 - Ensure `instruments/<name>.txt` exists for the value passed to `--instruments` (for example `instruments/all.txt` or `instruments/nifty500.txt`).
-- For NSE data, set `QLIB_REGION=in`.
+- For NSE data, set `QLIB_REGION=cn` (Qlib region keys like `in` are not supported by pyqlib).

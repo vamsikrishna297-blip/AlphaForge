@@ -37,6 +37,15 @@ def change_to_raw(features):
             raise ValueError(f"feature {feature} not supported")
     return result
 
+
+
+def _normalize_qlib_region(region: str) -> str:
+    normalized = str(region).strip().lower()
+    # qlib only supports built-in region keys (cn/us/tw).
+    # For custom dumped datasets (e.g. NSE), use CN config for expression/parsing defaults.
+    if normalized in {"in", "india", "nse"}:
+        return "cn"
+    return normalized or "cn"
 class StockData:
     _qlib_initialized: bool = False
 
@@ -72,7 +81,7 @@ class StockData:
             return
         import qlib
 
-        region = os.environ.get("QLIB_REGION", "cn")
+        region = _normalize_qlib_region(os.environ.get("QLIB_REGION", "cn"))
         qlib.init(provider_uri=qlib_path, region=region)
         cls._qlib_initialized = True
 
