@@ -1,4 +1,5 @@
 from typing import List, Union, Optional, Tuple, Dict
+import os
 from enum import IntEnum
 import numpy as np
 import pandas as pd
@@ -66,12 +67,13 @@ class StockData:
 
 
     @classmethod
-    def _init_qlib(cls,qlib_path) -> None:
+    def _init_qlib(cls, qlib_path) -> None:
         if cls._qlib_initialized:
             return
         import qlib
-        from qlib.config import REG_CN
-        qlib.init(provider_uri=qlib_path, region=REG_CN)
+
+        region = os.environ.get("QLIB_REGION", "cn")
+        qlib.init(provider_uri=qlib_path, region=region)
         cls._qlib_initialized = True
 
     def _load_exprs(self, exprs: Union[str, List[str]]) -> pd.DataFrame:
