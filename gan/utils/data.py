@@ -65,8 +65,7 @@ def get_data_by_year(
     QLIB_PATH = _resolve_qlib_path(freq, instruments=instruments)
     
     from gan.utils import load_pickle,save_pickle
-    # from gan.utils.qlib import get_data_my
-    get_data_my = StockData
+    from gan.utils.qlib import get_data_my
 
     train_dates=(f"{train_start}-01-01", f"{train_end}-12-31")
     val_dates=(f"{valid_year}-01-01", f"{valid_year}-12-31")
