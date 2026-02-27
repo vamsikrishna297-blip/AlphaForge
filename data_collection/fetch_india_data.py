@@ -204,7 +204,18 @@ def build_nse_qlib_data(
     if not symbol_rows:
         raise RuntimeError("No NSE symbols were exported. Check symbol list and network access.")
 
-    pd.DataFrame(symbol_rows).to_csv(dirs["base"] / "symbol_map.csv", index=False)
+    symbol_df = pd.DataFrame(symbol_rows)
+    symbol_df.to_csv(dirs["base"] / "symbol_map.csv", index=False)
+
+    # Create qlib instrument lists so training can use --instruments=all or --instruments=nifty500.
+    instruments_dir = qlib_dir / "instruments"
+    instruments_dir.mkdir(parents=True, exist_ok=True)
+    instrument_lines = [
+        f"{row['code']}\t{row['start']}\t{row['end']}"
+        for row in symbol_rows
+    ]
+    (instruments_dir / "all.txt").write_text("\n".join(instrument_lines) + "\n")
+    (instruments_dir / "nifty500.txt").write_text("\n".join(instrument_lines) + "\n")
 
     DumpDataAll(
         csv_path=str(dirs["export"]),

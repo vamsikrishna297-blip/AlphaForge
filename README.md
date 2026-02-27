@@ -142,3 +142,13 @@ Outputs are similar to the CN script:
 - `save_path/export/*.csv`
 - `save_path/symbol_map.csv`
 - `qlib_export_path/{calendars,features,instruments}`
+
+The script also writes `instruments/all.txt` and `instruments/nifty500.txt` so the training pipeline can use:
+
+```shell
+export QLIB_PATH_DAY=~/.qlib/qlib_data/in_data_rolling
+export QLIB_REGION=in
+python train_AFF.py --instruments=nifty500 --train_end_year=2020 --seeds=[0] --save_name=test
+```
+
+> Note: `nifty500.txt` is generated from the symbols you provide in `--symbols_file`. If that file is the actual NIFTY 500 constituent list, `--instruments=nifty500` will match NIFTY 500.
