@@ -54,7 +54,7 @@ Outputs per seed under `out/<save_name>_<instruments>_<train_end_year>_<seed>/`:
 - `combine_equal_sanity_<train_end>_<n_factors>_<window>_<seed>.csv`
 - `combine_equal_quintiles_<train_end>_<n_factors>_<window>_<seed>.csv` (q1..q5 and q5-q1 time series)
 - `combine_equal_summary_<train_end>_<n_factors>_<window>_<seed>.json`
-- `combine_equal_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample-date/day factor coefficients, IC stats, prediction preview + stock ids)
+- `combine_equal_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample-date/day factor coefficients, IC stats, prediction preview + stock ids + VWAP(t+1,t+21) used in target)
 
 #### stage3: Show the results
 
