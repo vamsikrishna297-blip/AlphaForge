@@ -152,3 +152,9 @@ python train_AFF.py --instruments=nifty500 --train_end_year=2020 --seeds=[0] --s
 ```
 
 > Note: `nifty500.txt` is generated from the symbols you provide in `--symbols_file`. If that file is the actual NIFTY 500 constituent list, `--instruments=nifty500` will match NIFTY 500.
+
+
+Troubleshooting (`No data returned from qlib`):
+- Ensure `QLIB_PATH_DAY` points to the real dumped dataset root (the folder containing `calendars/`, `features/`, `instruments/`).
+- Ensure `instruments/<name>.txt` exists for the value passed to `--instruments` (for example `instruments/all.txt` or `instruments/nifty500.txt`).
+- For NSE data, set `QLIB_REGION=in`.

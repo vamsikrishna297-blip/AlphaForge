@@ -4,9 +4,19 @@ from alphagen_generic.features import *
 from alphagen.data.expression import *
 
 import os
+from pathlib import Path
 
 
-def _resolve_qlib_path(freq: str):
+def _has_qlib_structure(root: str) -> bool:
+    base = Path(root)
+    return (
+        (base / "calendars" / "day.txt").exists()
+        and (base / "features").exists()
+        and (base / "instruments").exists()
+    )
+
+
+def _resolve_qlib_path(freq: str, instruments: str | None = None):
     env_key = f"QLIB_PATH_{freq.upper()}"
 
     candidates = []
@@ -15,18 +25,36 @@ def _resolve_qlib_path(freq: str):
         candidates.append(os.path.expanduser(env_value))
 
     # Backward compatible: keep supporting the repo-local placeholder path when present.
+    # Keep this after env var so custom datasets are preferred.
     candidates.append(os.path.expanduser("path/for/qlib"))
 
     # Keep the default consistent with README and data_collection script outputs.
     candidates.append(os.path.expanduser("~/.qlib/qlib_data/cn_data_rolling"))
 
+    missing_layout = []
+    missing_instruments = []
+
     for resolved in candidates:
-        if os.path.exists(resolved):
-            return {freq: resolved}
+        if not os.path.exists(resolved):
+            continue
+        if not _has_qlib_structure(resolved):
+            missing_layout.append(resolved)
+            continue
+
+        if instruments:
+            inst_file = Path(resolved) / "instruments" / f"{instruments}.txt"
+            if not inst_file.exists():
+                missing_instruments.append(str(inst_file))
+                continue
+
+        return {freq: resolved}
 
     raise FileNotFoundError(
-        f"Qlib data path does not exist for freq='{freq}'. Tried: {candidates}. "
-        f"Set {env_key} to your local qlib dataset path."
+        f"No usable Qlib dataset found for freq='{freq}' and instruments='{instruments}'. "
+        f"Tried paths: {candidates}. "
+        f"Missing qlib layout at: {missing_layout or '[]'}. "
+        f"Missing instrument file(s): {missing_instruments or '[]'}. "
+        f"Set {env_key} to a valid qlib root (with calendars/features/instruments)."
     )
 
 
@@ -34,7 +62,7 @@ def get_data_by_year(
     train_start = 2010,train_end=2019,valid_year=2020,test_year =2021,
     instruments=None, target=None,freq=None,
                     ):
-    QLIB_PATH = _resolve_qlib_path(freq)
+    QLIB_PATH = _resolve_qlib_path(freq, instruments=instruments)
     
     from gan.utils import load_pickle,save_pickle
     # from gan.utils.qlib import get_data_my
