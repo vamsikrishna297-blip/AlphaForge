@@ -45,6 +45,43 @@ def _quintile_bucket_returns(pred: torch.Tensor, y_true: torch.Tensor, n_buckets
     return vals
 
 
+
+
+def _percentile_bucket_returns(pred: torch.Tensor, y_true: torch.Tensor, percentile_edges: list[float]) -> dict:
+    pred_np = pred.detach().cpu().numpy().reshape(-1)
+    y_np = y_true.detach().cpu().numpy().reshape(-1)
+    valid = np.isfinite(pred_np) & np.isfinite(y_np)
+    pred_np, y_np = pred_np[valid], y_np[valid]
+
+    if len(pred_np) == 0:
+        out = {"n_assets": 0}
+        for i in range(len(percentile_edges) - 1):
+            lo = int(percentile_edges[i])
+            hi = int(percentile_edges[i + 1])
+            out[f"p{lo}_{hi}"] = 0.0
+        return out
+
+    edges = np.array(percentile_edges, dtype=float)
+    edges = np.clip(edges, 0, 100)
+    edges = np.unique(edges)
+    if len(edges) < 2:
+        edges = np.array([0.0, 100.0])
+
+    bounds = np.percentile(pred_np, edges)
+    out = {"n_assets": int(len(pred_np))}
+    for i in range(len(edges) - 1):
+        lo = int(edges[i])
+        hi = int(edges[i + 1])
+        left = bounds[i]
+        right = bounds[i + 1]
+        if i < len(edges) - 2:
+            mask = (pred_np >= left) & (pred_np < right)
+        else:
+            mask = (pred_np >= left) & (pred_np <= right)
+        vals = y_np[mask]
+        out[f"p{lo}_{hi}"] = float(np.nanmean(vals)) if len(vals) else 0.0
+    return out
+
 def _date_from_eval_index(data_all, eval_idx: int) -> pd.Timestamp:
     if not hasattr(data_all, "_dates"):
         return pd.Timestamp(eval_idx)
@@ -109,6 +146,7 @@ def main(
     window: Union[int, str] = 'inf',
     sanity_sample_n: int = 5,
     sanity_sample_date: Union[str, None] = None,
+    bucket_percentiles: str = "[0,20,40,60,80,100]",
 ):
     if not stock_list_file:
         raise ValueError("--stock_list_file is required (tab-separated code/start/end like instruments/*.txt)")
@@ -119,6 +157,12 @@ def main(
     if isinstance(window, str):
         assert window == 'inf'
         window = float('inf')
+
+    if isinstance(bucket_percentiles, str):
+        bucket_percentiles = eval(bucket_percentiles)
+    bucket_percentiles = sorted(set(float(x) for x in bucket_percentiles))
+    if len(bucket_percentiles) < 2:
+        bucket_percentiles = [0.0, 100.0]
 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(cuda)
     train_end = train_end_year
@@ -165,7 +209,7 @@ def main(
 
         shift = 21
         pred_list, ics_list, rics_list = [], [], []
-        sanity_rows, detailed_samples = [], []
+        sanity_rows, percentile_rows, detailed_samples = [], [], []
 
         eval_begin = len(fct_tensor) - data_test.n_days - data_valid.n_days
         eval_end = len(fct_tensor)
@@ -208,6 +252,7 @@ def main(
                 step_ic = np.nan
                 step_ric = np.nan
                 qret = {"q1": 0.0, "q2": 0.0, "q3": 0.0, "q4": 0.0, "q5": 0.0, "q5_q1": 0.0, "n_assets": 0}
+                pct_ret = _percentile_bucket_returns(pred_full[mask_cur], tgt_tensor[cur, mask_cur], bucket_percentiles)
             else:
                 to_pred = torch.nan_to_num(fct_tensor[cur, mask_cur][:, good_idx], nan=0)
                 y_true = tgt_tensor[cur, mask_cur]
@@ -227,6 +272,7 @@ def main(
                 step_ic = float(batch_pearsonr(pred.T, y_true.T)[0].detach().cpu().item())
                 step_ric = float(batch_spearmanr(pred.T, y_true.T)[0].detach().cpu().item())
                 qret = _quintile_bucket_returns(pred, y_true, n_buckets=5)
+                pct_ret = _percentile_bucket_returns(pred, y_true, bucket_percentiles)
                 ics_list.append(step_ic)
                 rics_list.append(step_ric)
 
@@ -278,6 +324,7 @@ def main(
             for i in range(10):
                 step_row[f"top_formula_{i + 1}"] = top_formulas[i] if i < len(top_formulas) else ""
             sanity_rows.append(step_row)
+            percentile_rows.append({"day_index": int(cur), "date": day_date, **pct_ret})
             pred_list.append(pred_full)
 
         num_1 = data_valid.n_days
@@ -291,11 +338,15 @@ def main(
         sanity_df[["day_index", "date", "q1_ret", "q2_ret", "q3_ret", "q4_ret", "q5_ret", "q5_q1_ret", "n_assets"]].to_csv(
             f"{tensor_save_path}/combine_quintiles_{name}.csv", index=False
         )
+        pd.DataFrame(percentile_rows).to_csv(
+            f"{tensor_save_path}/combine_bucket_returns_{name}.csv", index=False
+        )
         with open(f"{tensor_save_path}/combine_summary_{name}.json", "w", encoding="utf-8") as f:
             json.dump({
                 "seed": int(seed),
                 "stock_list_file": stock_list_file,
                 "n_steps": int(len(sanity_rows)),
+                "bucket_percentiles": bucket_percentiles,
                 "final_running_ic": float(np.nanmean(ics_list)) if len(ics_list) else 0.0,
                 "final_running_ric": float(np.nanmean(rics_list)) if len(rics_list) else 0.0,
             }, f, indent=2)

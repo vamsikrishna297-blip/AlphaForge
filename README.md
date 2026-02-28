@@ -66,9 +66,9 @@ Sanity-check files per seed (`out/<save_name>_<instruments>_<train_end_year>_<se
 
 Filtered-stock combine (using a custom instruments-like file such as `nifty300.txt`):
 ```shell
-python combine_AFF_filtered.py --instruments=nifty500 --stock_list_file=path/to/nifty300.txt --train_end_year=2020 --seeds='[0,1,2]' --save_name=test --n_factors=10 --window=inf --sanity_sample_n=5
+python combine_AFF_filtered.py --instruments=nifty500 --stock_list_file=path/to/nifty300.txt --train_end_year=2020 --seeds='[0,1,2]' --save_name=test --n_factors=10 --window=inf --sanity_sample_n=5 --bucket_percentiles="[0,10,20,30,40,50,60,70,80,90,100]"
 ```
-This writes the same `combine_sanity/combine_summary/combine_quintiles/combine_samples/pred*` artifacts, with `_filtered` suffix in prediction/output names.
+This writes the same `combine_sanity/combine_summary/combine_quintiles/combine_bucket_returns/combine_samples/pred*` artifacts, with `_filtered` suffix in prediction/output names.
 
 Equal-weight combine (no dynamic regression weights):
 ```shell
