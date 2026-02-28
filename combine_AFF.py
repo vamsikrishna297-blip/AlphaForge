@@ -119,6 +119,8 @@ def main(
         from gan.utils.builder import exprs2tensor
         fct_tensor = exprs2tensor(df['exprs'], data_all, normalize=True)
         tgt_tensor = exprs2tensor([target], data_all, normalize=False)
+        vwap_t1_tensor = exprs2tensor([Ref(vwap, -1)], data_all, normalize=False)
+        vwap_t21_tensor = exprs2tensor([Ref(vwap, -21)], data_all, normalize=False)
 
         ic_list = []
         ric_list = []
@@ -266,12 +268,16 @@ def main(
 
                 pred_preview = pred[:5, 0].detach().cpu().numpy().tolist()
                 tgt_preview = y_true[:5, 0].detach().cpu().numpy().tolist()
+                vwap_t1_preview = vwap_t1_tensor[cur, :5, 0].detach().cpu().numpy().tolist()
+                vwap_t21_preview = vwap_t21_tensor[cur, :5, 0].detach().cpu().numpy().tolist()
                 stock_ids = list(data_all._stock_ids[:5]) if hasattr(data_all, "_stock_ids") else list(range(len(pred_preview)))
                 stock_preview = [
                     {
                         "stock": str(stock_ids[i]),
                         "prediction": float(pred_preview[i]) if np.isfinite(pred_preview[i]) else None,
                         "target": float(tgt_preview[i]) if np.isfinite(tgt_preview[i]) else None,
+                        "vwap_t1": float(vwap_t1_preview[i]) if np.isfinite(vwap_t1_preview[i]) else None,
+                        "vwap_t21": float(vwap_t21_preview[i]) if np.isfinite(vwap_t21_preview[i]) else None,
                     }
                     for i in range(len(pred_preview))
                 ]
@@ -282,6 +288,8 @@ def main(
                     "prediction_preview": pred_preview,
                     "target_preview": tgt_preview,
                     "stock_preview": stock_preview,
+                    "vwap_t1_preview": vwap_t1_preview,
+                    "vwap_t21_preview": vwap_t21_preview,
                     "quintile_returns": qret,
                     "selected_details": selected_detail,
                 })

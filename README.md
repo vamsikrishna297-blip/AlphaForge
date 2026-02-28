@@ -51,7 +51,7 @@ Sanity-check files per seed (`out/<save_name>_<instruments>_<train_end_year>_<se
 - `combine_sanity_<train_end>_<n_factors>_<window>_<seed>.csv`
 - `combine_summary_<train_end>_<n_factors>_<window>_<seed>.json`
 - `combine_quintiles_<train_end>_<n_factors>_<window>_<seed>.csv` (q1..q5 and q5-q1 time series)
-- `combine_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample day-level coefficient/factor details + previews)
+- `combine_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample day-level coefficient/factor details + previews, including VWAP(t+1,t+21) used in target)
 
 `combine_sanity_*.csv` now also includes:
 - equal-weighted index return (`equal_weighted_index_ret`)
