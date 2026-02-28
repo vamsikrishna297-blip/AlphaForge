@@ -75,6 +75,14 @@ def _quintile_bucket_returns(pred: torch.Tensor, y_true: torch.Tensor, n_buckets
     return vals
 
 
+
+def _date_from_eval_index(data_all, eval_idx: int) -> str:
+    if not hasattr(data_all, "_dates"):
+        return str(eval_idx)
+    offset = int(getattr(data_all, "max_backtrack_days", 0))
+    raw_idx = min(eval_idx + offset, len(data_all._dates) - 1)
+    return str(data_all._dates[raw_idx])
+
 def main(
     instruments: str = "csi500",
     train_end_year: int = 2020,
@@ -206,7 +214,7 @@ def main(
                 f"eq ic:{np.nanmean(ics_list):.3f} ric:{np.nanmean(rics_list):.3f} n:{len(good_idx)}"
             )
 
-            day_date = str(data_all._dates[cur]) if hasattr(data_all, "_dates") else str(cur)
+            day_date = _date_from_eval_index(data_all, cur)
             step_row = {
                 "day_index": int(cur),
                 "date": day_date,

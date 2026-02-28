@@ -161,6 +161,7 @@ python train_AFF.py --instruments=nifty500 --train_end_year=2020 --seeds=[0] --s
 
 
 Troubleshooting (`No data returned from qlib`):
+- Sample JSON day `date` is now aligned to evaluated tensor indices (accounts for Qlib backtrack offset), so it matches the price fields used for target construction.
 - If your dumped dataset does not include `factor`, the loader now falls back to non-factor raw expressions automatically.
 - If your requested date range starts before the dataset calendar start, upgrade to the latest code (calendar bounds are now clamped to avoid empty loads from negative indexing).
 - In notebooks, run env exports in the same shell invocation as training (or use `%env`) because separate `!export ...` lines do not persist across commands.
