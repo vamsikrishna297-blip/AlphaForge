@@ -41,16 +41,18 @@ Sanity-check files per seed (`out/<save_name>_<instruments>_<train_end_year>_<se
 
 #### stage2: Combining alpha factors
 ```shell
-python combine_AFF.py --instruments=csi300 --train_end_year=2020 --seeds=[0,1,2,3,4] --save_name=test --n_factors=10 --window=inf --sanity_sample_n=5
+python combine_AFF.py --instruments=csi300 --train_end_year=2020 --seeds=[0,1,2,3,4] --save_name=test --n_factors=10 --window=inf --sanity_sample_n=5 --bucket_percentiles="[0,10,20,30,40,50,60,70,80,90,100]"
 ```
 Here `instruments,train_end_year,seeds,save_name`,` must be the same as it in stage 1
 - `n_factors` is the num of factors used at each day, it should be less than or equal to `zoo_size` in stage 1.
 - `window` is the slicing window that is used to evaluate the alpha factors in order to dynamicly select and cobine.
+- `bucket_percentiles` controls extra return-bucket CSV edges (in percent).
 
 Sanity-check files per seed (`out/<save_name>_<instruments>_<train_end_year>_<seed>/`):
 - `combine_sanity_<train_end>_<n_factors>_<window>_<seed>.csv`
 - `combine_summary_<train_end>_<n_factors>_<window>_<seed>.json`
 - `combine_quintiles_<train_end>_<n_factors>_<window>_<seed>.csv` (q1..q5 and q5-q1 time series)
+- `combine_bucket_returns_<train_end>_<n_factors>_<window>_<seed>.csv` (custom percentile bucket returns)
 - `combine_samples_<train_end>_<n_factors>_<window>_<seed>.json` (sample day-level coefficient/factor details + previews, including VWAP(t+1,t+21) used in target)
 
 `combine_sanity_*.csv` now also includes:
