@@ -1,4 +1,5 @@
 from typing import List, Union, Optional, Tuple, Dict
+import os
 from enum import IntEnum
 import numpy as np
 import pandas as pd
@@ -36,6 +37,27 @@ def change_to_raw(features):
             raise ValueError(f"feature {feature} not supported")
     return result
 
+
+def change_to_raw_no_factor(features):
+    """Fallback for datasets that do not provide `$factor`."""
+    result = []
+    for feature in features:
+        if feature in ['$open', '$close', '$high', '$low', '$vwap']:
+            result.append(feature)
+        elif feature in ['$volume']:
+            result.append(f"{feature}/1000000")
+        else:
+            raise ValueError(f"feature {feature} not supported")
+    return result
+
+
+def _normalize_qlib_region(region: str) -> str:
+    normalized = str(region).strip().lower()
+    # qlib only supports built-in region keys (cn/us/tw).
+    # For custom dumped datasets (e.g. NSE), use CN config for expression/parsing defaults.
+    if normalized in {"in", "india", "nse"}:
+        return "cn"
+    return normalized or "cn"
 class StockData:
     _qlib_initialized: bool = False
 
@@ -66,12 +88,13 @@ class StockData:
 
 
     @classmethod
-    def _init_qlib(cls,qlib_path) -> None:
+    def _init_qlib(cls, qlib_path) -> None:
         if cls._qlib_initialized:
             return
         import qlib
-        from qlib.config import REG_CN
-        qlib.init(provider_uri=qlib_path, region=REG_CN)
+
+        region = _normalize_qlib_region(os.environ.get("QLIB_REGION", "cn"))
+        qlib.init(provider_uri=qlib_path, region=region)
         cls._qlib_initialized = True
 
     def _load_exprs(self, exprs: Union[str, List[str]]) -> pd.DataFrame:
@@ -82,27 +105,73 @@ class StockData:
         if not isinstance(exprs, list):
             exprs = [exprs]
         cal: np.ndarray = D.calendar(freq=self.freq)
-        start_index = cal.searchsorted(pd.Timestamp(self._start_time))  # type: ignore
-        end_index = cal.searchsorted(pd.Timestamp(self._end_time))  # type: ignore
-        real_start_time = cal[start_index - self.max_backtrack_days]
-        if cal[end_index] != pd.Timestamp(self._end_time):
+        if len(cal) == 0:
+            raise ValueError(f"Qlib calendar is empty for freq='{self.freq}'.")
+
+        start_ts = pd.Timestamp(self._start_time)
+        end_ts = pd.Timestamp(self._end_time)
+
+        start_index = int(cal.searchsorted(start_ts))  # type: ignore
+        end_index = int(cal.searchsorted(end_ts))  # type: ignore
+
+        # Clamp to valid calendar range to avoid negative / overflow indexing.
+        start_index = min(max(start_index, 0), len(cal) - 1)
+        end_index = min(max(end_index, 0), len(cal) - 1)
+
+        if cal[end_index] > end_ts and end_index > 0:
             end_index -= 1
-        # real_end_time = cal[min(end_index + self.max_future_days,len(cal)-1)]
-        real_end_time = cal[end_index + self.max_future_days]
-        result =  (QlibDataLoader(config=exprs,freq=self.freq)  # type: ignore
-                .load(self._instrument, real_start_time, real_end_time))
+
+        real_start_idx = max(start_index - self.max_backtrack_days, 0)
+        real_end_idx = min(end_index + self.max_future_days, len(cal) - 1)
+
+        real_start_time = cal[real_start_idx]
+        real_end_time = cal[real_end_idx]
+
+        if real_start_time > real_end_time:
+            raise ValueError(
+                "Invalid calendar window after indexing. "
+                f"start={self._start_time}, end={self._end_time}, "
+                f"real_start={real_start_time}, real_end={real_end_time}, "
+                f"calendar_range=({cal[0]}, {cal[-1]})."
+            )
+
+        result = (QlibDataLoader(config=exprs, freq=self.freq)  # type: ignore
+                  .load(self._instrument, real_start_time, real_end_time))
         return result
     
     def _get_data(self) -> Tuple[torch.Tensor, pd.Index, pd.Index]:
-        features = ['$' + f.name.lower() for f in self._features]
+        base_features = ['$' + f.name.lower() for f in self._features]
         if self.raw and self.freq == 'day':
-            features = change_to_raw(features)
+            features = change_to_raw(base_features)
         elif self.raw:
-            features = change_to_raw_min(features)
+            features = change_to_raw_min(base_features)
+        else:
+            features = base_features
+
         df = self._load_exprs(features)
+
+        # Fallback for custom datasets that do not have `$factor`.
+        if (df is None or df.empty) and self.raw and self.freq == 'day':
+            fallback_features = change_to_raw_no_factor(base_features)
+            df = self._load_exprs(fallback_features)
+            if df is not None and not df.empty:
+                features = fallback_features
+
         self.df_bak = df
+        if df is None or df.empty:
+            raise ValueError(
+                "No data returned from qlib. Check instruments/date range/feature fields and qlib_path "
+                f"(instrument={self._instrument}, start={self._start_time}, "
+                f"end={self._end_time}, freq={self.freq}, features={features})."
+            )
         # print(df)
         df = df.stack().unstack(level=1)
+        if df.empty or len(df.columns) == 0:
+            raise ValueError(
+                "Qlib returned an empty dataframe after stacking; ensure instrument universe "
+                "(e.g. csi300/csi500/all) exists in your qlib dataset and includes the "
+                "requested date range."
+            )
         dates = df.index.levels[0]                                      # type: ignore
         stock_ids = df.columns
         values = df.values
